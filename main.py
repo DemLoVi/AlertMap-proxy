@@ -6,8 +6,19 @@ from alerts_in_ua import Client as AlertClient
 from pydantic_settings import BaseSettings
 import redis
 
+class TimerSettings(BaseSettings):
+    soft_ttl: int
+    lock_ttl: int
+    hard_ttl: int
+
+class DbSettings(BaseSettings):
+    redis_host: str
+    redis_port: int
+
 class Settings(BaseSettings):
     api_token: str
+    db = DbSettings()
+    tim = TimerSettings()
 
     class Config:
         env_file = ".env"
@@ -19,17 +30,14 @@ app = FastAPI()
 alerts = AlertClient(token=settings.api_token)
 
 r = redis.Redis(
-    host="localhost",
-    port=6379,
+    host=settings.db.redis_host,
+    port=settings.db.redis_port,
     decode_responses=True
 )
 
 CACHE_KEY = "api:v1:pattern_list"
 LOCK_KEY = "lock:api:v1:pattern_list"
 
-SOFT_TTL = 60
-LOCK_TTL = 5
-REDIS_HARD_TTL = 86400
 
 
 def getAPIdata():
@@ -81,7 +89,7 @@ def save_cache(value):
         "value": value,
         "updated_at": int(time.time())
     }
-    r.set(CACHE_KEY, json.dumps(payload), ex=REDIS_HARD_TTL)
+    r.set(CACHE_KEY, json.dumps(payload), ex=settings.tim.hard_ttl)
 
 
 # --- Endpoint ---
@@ -93,11 +101,11 @@ def get_data():
     # Avaible actual cache
     if cache:
         age = now - cache["updated_at"]
-        if age < SOFT_TTL:
+        if age < settings.tim.soft_ttl:
             return cache["value"]
 
     # Cache outdated
-    lock_token = acquire_lock(LOCK_KEY, LOCK_TTL)
+    lock_token = acquire_lock(LOCK_KEY, settings.tim.lock_ttl)
 
     if lock_token:
         try:
