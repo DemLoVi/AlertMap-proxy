@@ -3,25 +3,19 @@ import json
 import uuid
 from fastapi import FastAPI, HTTPException
 from alerts_in_ua import Client as AlertClient
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 import redis
 
-class TimerSettings(BaseSettings):
+
+class Settings(BaseSettings):
+    api_token: str
+    redis_host: str
+    redis_port: int
     soft_ttl: int
     lock_ttl: int
     hard_ttl: int
 
-class DbSettings(BaseSettings):
-    redis_host: str
-    redis_port: int
-
-class Settings(BaseSettings):
-    api_token: str
-    db = DbSettings()
-    tim = TimerSettings()
-
-    class Config:
-        env_file = ".env"
+    model_config = SettingsConfigDict(env_file=".env")
 
 settings = Settings()
 
@@ -29,15 +23,16 @@ app = FastAPI()
 
 alerts = AlertClient(token=settings.api_token)
 
+
 r = redis.Redis(
-    host=settings.db.redis_host,
-    port=settings.db.redis_port,
+    host=settings.redis_host,
+    port=settings.redis_port,
     decode_responses=True
 )
 
+
 CACHE_KEY = "api:v1:pattern_list"
 LOCK_KEY = "lock:api:v1:pattern_list"
-
 
 
 def getAPIdata():
@@ -59,6 +54,7 @@ def getAPIdata():
     )
 
     return result
+
 
 # --- Lock helpers ---
 def acquire_lock(lock_key, ttl):
@@ -89,7 +85,7 @@ def save_cache(value):
         "value": value,
         "updated_at": int(time.time())
     }
-    r.set(CACHE_KEY, json.dumps(payload), ex=settings.tim.hard_ttl)
+    r.set(CACHE_KEY, json.dumps(payload), ex=settings.hard_ttl)
 
 
 # --- Endpoint ---
@@ -101,11 +97,11 @@ def get_data():
     # Avaible actual cache
     if cache:
         age = now - cache["updated_at"]
-        if age < settings.tim.soft_ttl:
+        if age < settings.soft_ttl:
             return cache["value"]
 
     # Cache outdated
-    lock_token = acquire_lock(LOCK_KEY, settings.tim.lock_ttl)
+    lock_token = acquire_lock(LOCK_KEY, settings.lock_ttl)
 
     if lock_token:
         try:
