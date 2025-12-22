@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     lock_ttl: int
     hard_ttl: int
 
-    model_config = SettingsConfigDict(env_file=".env")
+    model_config = SettingsConfigDict(env_file="config/.env")
 
 settings = Settings()
 
