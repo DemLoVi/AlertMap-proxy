@@ -2,9 +2,9 @@ import time
 import json
 import uuid
 from fastapi import FastAPI, HTTPException
-from alerts_in_ua import Client as AlertClient
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import redis
+import requests
 
 
 class Settings(BaseSettings):
@@ -21,7 +21,6 @@ settings = Settings()
 
 app = FastAPI()
 
-alerts = AlertClient(token=settings.api_token)
 
 
 r = redis.Redis(
@@ -36,7 +35,14 @@ LOCK_KEY = "lock:api:v1:pattern_list"
 
 
 def getAPIdata():
-    all_alerts = alerts.get_air_raid_alert_statuses()
+    r = requests.get(
+        "https://api.alerts.in.ua/v1/iot/active_air_raid_alerts.json",
+        params={"token": settings.api_token},
+        timeout=10,
+    )
+    r.raise_for_status
+    all_alerts = r.json()
+    print(all_alerts)
 
     ranges = [
         (30, 153),
@@ -104,9 +110,9 @@ def get_data():
     lock_token = acquire_lock(LOCK_KEY, settings.lock_ttl)
 
     if lock_token:
+        data = getAPIdata()
         try:
             # Requesting data
-            data = getAPIdata()
             save_cache(data)
             return data
         except Exception:
