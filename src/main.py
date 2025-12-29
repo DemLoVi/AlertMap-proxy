@@ -1,10 +1,12 @@
 import time
 import json
 import uuid
+
 from fastapi import FastAPI, HTTPException
 from pydantic_settings import BaseSettings, SettingsConfigDict
-import redis
-import requests
+
+import httpx
+import redis.asyncio as redis
 
 
 class Settings(BaseSettings):
@@ -17,10 +19,9 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file="config/.env")
 
+
 settings = Settings()
-
 app = FastAPI()
-
 
 
 r = redis.Redis(
@@ -29,20 +30,18 @@ r = redis.Redis(
     decode_responses=True
 )
 
-
 CACHE_KEY = "api:v1:pattern_list"
 LOCK_KEY = "lock:api:v1:pattern_list"
 
 
-def getAPIdata():
-    r = requests.get(
-        "https://api.alerts.in.ua/v1/iot/active_air_raid_alerts.json",
-        params={"token": settings.api_token},
-        timeout=10,
-    )
-    r.raise_for_status
-    all_alerts = r.json()
-    print(all_alerts)
+async def get_api_data():
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(
+            "https://api.alerts.in.ua/v1/iot/active_air_raid_alerts.json",
+            params={"token": settings.api_token},
+        )
+        resp.raise_for_status()
+        all_alerts = resp.json()
 
     ranges = [
         (30, 153),
@@ -53,8 +52,8 @@ def getAPIdata():
 
     length = len(all_alerts)
 
-    result = ''.join(
-        all_alerts[s:e+1]
+    result = "".join(
+        all_alerts[s:e + 1]
         for s, e in ranges
         if s < length
     )
@@ -63,13 +62,13 @@ def getAPIdata():
 
 
 # --- Lock helpers ---
-def acquire_lock(lock_key, ttl):
+async def acquire_lock(lock_key: str, ttl: int):
     token = str(uuid.uuid4())
-    ok = r.set(lock_key, token, nx=True, ex=ttl)
+    ok = await r.set(lock_key, token, nx=True, ex=ttl)
     return token if ok else None
 
 
-def release_lock(lock_key, token):
+async def release_lock(lock_key: str, token: str):
     lua = """
     if redis.call("get", KEYS[1]) == ARGV[1] then
         return redis.call("del", KEYS[1])
@@ -77,43 +76,47 @@ def release_lock(lock_key, token):
         return 0
     end
     """
-    r.eval(lua, 1, lock_key, token)
+    await r.eval(lua, 1, lock_key, token)
 
 
 # --- Cache helpers ---
-def get_cache():
-    raw = r.get(CACHE_KEY)
+async def get_cache():
+    raw = await r.get(CACHE_KEY)
     return json.loads(raw) if raw else None
 
 
-def save_cache(value):
+async def save_cache(value):
     payload = {
         "value": value,
         "updated_at": int(time.time())
     }
-    r.set(CACHE_KEY, json.dumps(payload), ex=settings.hard_ttl)
+    await r.set(
+        CACHE_KEY,
+        json.dumps(payload),
+        ex=settings.hard_ttl
+    )
 
 
 # --- Endpoint ---
 @app.get("/data")
-def get_data():
+async def get_data():
     now = int(time.time())
-    cache = get_cache()
+    cache = await get_cache()
 
     # Avaible actual cache
     if cache:
         age = now - cache["updated_at"]
         if age < settings.soft_ttl:
             return cache["value"]
-
+        
     # Cache outdated
-    lock_token = acquire_lock(LOCK_KEY, settings.lock_ttl)
+    lock_token = await acquire_lock(LOCK_KEY, settings.lock_ttl)
 
     if lock_token:
-        data = getAPIdata()
         try:
             # Requesting data
-            save_cache(data)
+            data = await get_api_data()
+            await save_cache(data)
             return data
         except Exception:
             # API not responding
@@ -121,7 +124,7 @@ def get_data():
                 return cache["value"]
             raise HTTPException(status_code=503, detail="API unavailable")
         finally:
-            release_lock(LOCK_KEY, lock_token)
+            await release_lock(LOCK_KEY, lock_token)
 
     # Data updating already
     if cache:
