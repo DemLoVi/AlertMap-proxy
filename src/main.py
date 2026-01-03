@@ -42,7 +42,6 @@ def getAPIdata():
     )
     r.raise_for_status
     all_alerts = r.json()
-    print(all_alerts)
 
     ranges = [
         (30, 153),

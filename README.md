@@ -48,24 +48,9 @@ REDIS_HARD_TTL=86400
 
 In most cases, only `API_TOKEN` needs to be changed.
 
-## Installation
+## Installation and runing
 
-1. Install Python 3.11 or newer
-2. Install and start Redis
-3. Install Python dependencies:
-
-   ```bash
-   pip install -r requirements.txt
-   ```
-4. Copy `.env.example` to `.env` and set your API token
-
-## Running the Service
-
-Run the server using uvicorn:
-
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
+Just make ```docker compose up --buid```
 
 After startup:
 
