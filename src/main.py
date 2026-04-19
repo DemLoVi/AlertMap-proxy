@@ -112,7 +112,7 @@ LOCK_KEY = "lock:api:v1:pattern_list"
 async def get_api_data():
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.get(
-            "https://api.alerts.in.ua/v1/iot/active_air_raid_alerts.json",
+            "https://api.ukrainealarm.com/api/v3/alerts",
             headers={'accept': 'application/json', 'Authorization': settings.api_token},
         )
         resp.raise_for_status()
