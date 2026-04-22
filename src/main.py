@@ -14,6 +14,25 @@ import redis.asyncio as redis
 import logging
 
 
+all_districts = []
+
+with open("etc/alldata.json", "r", encoding="utf-8") as f:
+    full_data = json.load(f)
+
+for state in full_data["states"]:
+    for district in state.get("regionChildIds", []):
+        if district["regionType"] == "District":
+            all_districts.append({
+                "regionId": district["regionId"],
+                "regionName": district["regionName"]
+            })
+            
+special_regions = [
+    {"regionId": "30", "regionName": "м. Київ"},
+    {"regionId": "31", "regionName": "м. Севастополь"},
+]
+
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s"
@@ -93,27 +112,40 @@ LOCK_KEY = "lock:api:v1:pattern_list"
 async def get_api_data():
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.get(
-            "https://api.alerts.in.ua/v1/iot/active_air_raid_alerts.json",
-            params={"token": settings.api_token},
+            "https://api.ukrainealarm.com/api/v3/alerts",
+            headers={'accept': 'application/json', 'Authorization': settings.api_token},
         )
         resp.raise_for_status()
-        all_alerts = resp.json()
-
-    ranges = [
-        (30, 153),
-        (564, 564),
-        (1293, 1293),
-        (1801, 1804),
-    ]
-
-    length = len(all_alerts)
-
+        data = resp.json()
+            
+    active_ids  = {
+        region["regionId"]
+        for region in data
+        if region["regionType"] == "District"
+        or region["regionId"] in {"30", "31"}
+    }
+    
+    # ? Better realisation on JSON
+    # result = [
+    #     {
+    #         "regionId": d["regionId"],
+    #         "regionName": d["regionName"],
+    #         "hasAlert": d["regionId"] in active_district_ids
+    #     }
+    #     for d in all_districts
+    # ]
+    
+    all_districts_sorted = sorted(all_districts, key=lambda x: int(x["regionId"]))
+    final_regions = special_regions + all_districts_sorted
+    
     result = "".join(
-        all_alerts[s:e + 1]
-        for s, e in ranges
-        if s < length
+        "A" if d["regionId"] in active_ids  else "N"
+        for d in final_regions
     )
-
+    
+    # ! Костиль для деяких міст та районів
+    result += "NNAAAA"
+    
     return result
 
 
