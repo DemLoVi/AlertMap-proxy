@@ -125,7 +125,7 @@ async def get_api_data():
         or region["regionId"] in {"30", "31"}
     }
     
-    active_ids.add("87")
+    active_ids.update(["87", "86", "85", "84"])
     
     # ? Better realisation on JSON
     # result = [
